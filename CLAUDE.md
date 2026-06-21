@@ -10,7 +10,7 @@ backend. Ships as a single header and a single prebuilt static library.
 include/dante/DanteAudio.hpp    — public API (single header)
 src/DanteAudio.cpp              — implementation (compiled into libDanteAudio.a)
 lib/libDanteAudio.a             — committed prebuilt: libdep_audio.a + DanteAudio.o
-lib/libdep_audio.a              — original Audinate prebuilt (input to dist build only)
+lib/libdep_audio.a              — Audinate prebuilt built from sw__dep_examples (input to dist build only)
 cmake/libDanteAudio.cmake       — CMake: imports the library as the DanteAudio target
 ```
 
@@ -18,14 +18,37 @@ cmake/libDanteAudio.cmake       — CMake: imports the library as the DanteAudio
 
 ## Recreating the SDK from Scratch
 
-### Source Material
+### Prerequisites
 
-**Reference example** — read this first. It demonstrates every pattern the SDK supports:
-```
-../sw__dep_examples/dep_example_apps/dep_loopback/DanteLoopback.cpp
+- `../sw__dep_examples` checked out alongside this repo
+- A C++11 toolchain with `g++` and `ar` (provided by `nix develop` in the test app repo)
+
+---
+
+### Step 1 — Build libdep_audio.a from the Audinate source
+
+From `../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/`:
+
+```sh
+make -f make/Makefile-lib
 ```
 
-**Headers to consolidate** into `DanteAudio.hpp`:
+This produces `libdep_audio.a` in that directory. Copy it into the SDK:
+
+```sh
+cp ../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/libdep_audio.a lib/libdep_audio.a
+```
+
+This file contains the compiled Audinate platform objects: `DanteBuffers`, `DanteSharedMemory`,
+`DanteTiming`, `DanteRunner`, `DanteTelemetry`, `DdhiClient`. Never modify it.
+
+---
+
+### Step 2 — Consolidate into include/dante/DanteAudio.hpp
+
+Merge these six headers from `../sw__dep_examples` into `include/dante/DanteAudio.hpp`
+inside `namespace Dante {}`:
+
 ```
 ../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/include/dante/Buffers.hpp
 ../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/buffer_client/media/include/dante/BufferView.hpp
@@ -35,18 +58,8 @@ cmake/libDanteAudio.cmake       — CMake: imports the library as the DanteAudio
 ../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/buffer_client/media/include/dante/Log.hpp
 ```
 
-**Prebuilt library** — commit as `lib/libdep_audio.a`, never modify:
-```
-../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/lib/<platform>/libdep_audio.a
-```
-Contains the compiled Audinate platform objects (`DanteBuffers`, `DanteSharedMemory`,
-`DanteTiming`, `DanteRunner`, `DanteTelemetry`, `DdhiClient`).
-
----
-
-### Step 1 — Consolidate into DanteAudio.hpp
-
-Merge all six headers above into `include/dante/DanteAudio.hpp` inside `namespace Dante {}`.
+Read `../sw__dep_examples/dep_example_apps/dep_loopback/DanteLoopback.cpp` first — it
+demonstrates every pattern the SDK needs to support.
 
 Required standard includes:
 `<algorithm>`, `<atomic>`, `<chrono>`, `<cstdarg>`, `<cstdint>`, `<cstdio>`, `<ctime>`,
@@ -59,7 +72,7 @@ Required standard includes:
 - `memory_barrier_acquire()` — must be inline for correctness on all architectures
 - Trivial one-line getters on `BufferView` and `BufferBlockAccessor`
 
-**Declare in header, define in DanteAudio.cpp**:
+**Declare in header, define in src/DanteAudio.cpp**:
 - `toString(LogLevel)`, `fromString(LogLevel)`
 - `PrintfLogger::log()`
 - All non-trivial `BufferView` methods: `poll()`, `reset()`, timestamp helpers, channel descriptions
@@ -70,7 +83,7 @@ Required standard includes:
 
 ---
 
-### Step 2 — What to Remove
+### Step 3 — What to Remove
 
 The following exist in the source headers but must NOT be included in the SDK:
 
@@ -90,7 +103,7 @@ commented-out no-op (`/*ddhiTelemetry*/`) to avoid breaking existing call sites.
 
 ---
 
-### Step 3 — Create src/DanteAudio.cpp
+### Step 4 — Create src/DanteAudio.cpp
 
 ```cpp
 #include <dante/DanteAudio.hpp>
@@ -100,34 +113,78 @@ namespace Dante {
 }
 ```
 
-Move every non-trivial, non-template function body listed above out of the header into this file.
+Move every non-trivial, non-template function body out of the header into this file.
 
 ---
 
-### Step 4 — Build and Commit the Combined Library
+### Step 5 — Create cmake/libDanteAudio.cmake
 
-`libDanteAudio.a` is produced by compiling `DanteAudio.cpp` and merging the resulting object
-with `libdep_audio.a`. The `dante_sdk_dist` CMake target in the consuming project reproduces
-this step exactly — it is the canonical record of how the committed `.a` was built.
+This is the consumer-facing cmake file. It only defines the imported target — no source
+compilation, no build targets:
 
-To rebuild after changing `DanteAudio.cpp` (run from the consuming project directory):
+```cmake
+get_filename_component(_DANTE_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+
+add_library(DanteAudio STATIC IMPORTED GLOBAL)
+set_target_properties(DanteAudio PROPERTIES
+    IMPORTED_LOCATION "${_DANTE_SDK_ROOT}/lib/libDanteAudio.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${_DANTE_SDK_ROOT}/include"
+)
+target_link_libraries(DanteAudio INTERFACE pthread rt)
+```
+
+Consumers include this file and link against `DanteAudio`. No SDK source is compiled on
+their end.
+
+---
+
+### Step 6 — Build and Commit libDanteAudio.a
+
+`libDanteAudio.a` is produced by compiling `DanteAudio.cpp` and merging it with
+`libdep_audio.a`. This is done by the `dante_sdk_dist` target in the consuming project's
+`CMakeLists.txt`. Add the following to the consuming project (not to this SDK's cmake):
+
+```cmake
+set(_DANTE_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Dante-DEP-Client-SDK")
+set(_DANTE_DIST_DIR "${CMAKE_BINARY_DIR}/dante-dep-sdk")
+set(_DANTE_DIST_LIB "${_DANTE_DIST_DIR}/lib/libDanteAudio.a")
+
+add_library(dante_audio_impl OBJECT EXCLUDE_FROM_ALL "${_DANTE_SDK_ROOT}/src/DanteAudio.cpp")
+target_include_directories(dante_audio_impl PRIVATE "${_DANTE_SDK_ROOT}/include")
+
+add_custom_command(
+    OUTPUT "${_DANTE_DIST_LIB}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_DANTE_DIST_DIR}/lib"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "${_DANTE_SDK_ROOT}/lib/libdep_audio.a"
+            "${_DANTE_DIST_LIB}"
+    COMMAND ${CMAKE_AR} q "${_DANTE_DIST_LIB}"
+            $<TARGET_OBJECTS:dante_audio_impl>
+    DEPENDS dante_audio_impl "${_DANTE_SDK_ROOT}/lib/libdep_audio.a"
+    COMMENT "Building combined Dante SDK library"
+)
+
+add_custom_target(dante_sdk_dist
+    DEPENDS "${_DANTE_DIST_LIB}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_DANTE_DIST_DIR}/include/dante"
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "${_DANTE_SDK_ROOT}/include/dante/DanteAudio.hpp"
+            "${_DANTE_DIST_DIR}/include/dante/DanteAudio.hpp"
+    COMMENT "Dante SDK distribution: build/dante-dep-sdk/"
+)
+```
+
+`EXCLUDE_FROM_ALL` on `dante_audio_impl` ensures `DanteAudio.cpp` is not compiled during a
+normal build — only when `dante_sdk_dist` is explicitly requested.
+
+To build and commit the combined library (run from the consuming project directory):
+
 ```sh
 cmake --build build --target dante_sdk_dist
-cp build/dante-dep-sdk/lib/libDanteAudio.a /path/to/Dante-DEP-Client-SDK/lib/libDanteAudio.a
+cp build/dante-dep-sdk/lib/libDanteAudio.a ../Dante-DEP-Client-SDK/lib/libDanteAudio.a
 ```
 
 Commit `DanteAudio.cpp` and the updated `libDanteAudio.a` together.
-
----
-
-### Step 5 — cmake/libDanteAudio.cmake
-
-This file only defines the consumer-facing `DanteAudio` imported target. It does not
-compile any source or define any build targets. Consumers include it and link against
-`DanteAudio` — no SDK source compilation is required on their end.
-
-The dist build logic (`dante_audio_impl` OBJECT library, `dante_sdk_dist` custom target)
-lives in the consuming project's `CMakeLists.txt`, not here.
 
 ---
 
