@@ -60,12 +60,22 @@ It must be running before any process calls `DefaultBufferContext::wait()`.
 
 ```sh
 # Cross-compiled for the aarch64 target (deploy this one)
-nix build .#dep-sync-fanoutd-aarch64
-result/bin/dep_sync_fanoutd   # copy to target
+nix build .#dep-client-sdk-aarch64
+# result/ contains:
+#   bin/dep_sync_fanoutd              — daemon binary for the target
+#   lib/libDanteAudio.a               — compiled for aarch64 (see note below)
+#   include/dante/DanteAudio.hpp      — SDK header
+#   cmake/libDanteAudio.cmake         — CMake integration
+#   lib/systemd/system/dep_sync_fanoutd.service
 
-# Native x86-64 build (smoke test only)
-nix build .#dep-sync-fanoutd
+# Native x86-64 build (dev/test on the build machine)
+nix build .#dep-client-sdk
 ```
+
+> **Note on the aarch64 library**: the aarch64 `libDanteAudio.a` contains only
+> `DanteAudio.cpp` compiled for aarch64. The closed-source `libdep_audio.a` from
+> Audinate is x86-64 and cannot be cross-bundled. The consuming project must also
+> link against the aarch64 `libdep_audio.a` from the Audinate DEP SDK.
 
 ## Deploying the daemon
 
