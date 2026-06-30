@@ -2,198 +2,196 @@
 
 ## What This Is
 
-A stripped-down C++ SDK for the Audinate DEP (Dante Embedded Platform) shared-memory audio
-API. Derived from `../sw__dep_examples` and trimmed to the subset needed by a JUCE audio
-backend. Ships as a single header and a single prebuilt static library.
+A stripped-down SDK for the Audinate DEP (Dante Embedded Platform) shared-memory audio API.
+Derived from `../sw__dep_examples` and trimmed to the subset needed by a JUCE audio backend.
+
+The implementation is C++17. The library (`libDanteAudio.a`) is built by compiling
+`src/DanteAudio.cpp` against the closed-source `lib/libdep_audio.a` supplied by Audinate.
 
 ```
-include/dante/DanteAudio.hpp    — public API (single header)
-src/DanteAudio.cpp              — implementation (compiled into libDanteAudio.a)
-lib/libDanteAudio.a             — committed prebuilt: libdep_audio.a + DanteAudio.o
-lib/libdep_audio.a              — Audinate prebuilt built from sw__dep_examples (input to dist build only)
-cmake/libDanteAudio.cmake       — CMake: imports the library as the DanteAudio target
+src/DanteAudio.cpp               — non-template method implementations
+include/dante/DanteAudio.hpp     — consolidated SDK header (BufferView, BufferBlockAccessor,
+                                   DefaultBufferContext, SharedMemory, Buffers, Timing, …)
+lib/libdep_audio.a               — Audinate DEP shared-memory library (prebuilt, target-specific)
+lib/libDanteAudio.a              — DanteAudio.cpp + libdep_audio.a bundled (committed prebuilt)
+cmake/libDanteAudio.cmake        — CMake: imports libDanteAudio.a as the DanteAudio target
+daemon/dep_sync_fanoutd.cpp      — Relay daemon (see Period Synchronisation section)
+daemon/CMakeLists.txt            — CMake build for the daemon
+daemon/dep_sync_fanoutd.service  — systemd unit
 ```
 
 ---
 
-## Recreating the SDK from Scratch
+## Building the SDK
 
 ### Prerequisites
 
-- `../sw__dep_examples` checked out alongside this repo
-- A C++11 toolchain with `g++` and `ar` (provided by `nix develop` in the test app repo)
+- A C++17 toolchain (g++ ≥ 9 or clang++ ≥ 10)
+- `lib/libdep_audio.a` for the target architecture (from Audinate DEP SDK)
 
----
-
-### Step 1 — Build libdep_audio.a from the Audinate source
-
-From `../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/`:
+### Build and update the committed library
 
 ```sh
-make -f make/Makefile-lib
+# Compile DanteAudio.cpp
+g++ -O2 -std=c++17 -c src/DanteAudio.cpp -Iinclude -o /tmp/DanteAudio.o
+
+# Extract libdep_audio.a objects into a temp dir
+mkdir -p /tmp/dep_objs
+(cd /tmp/dep_objs && ar x $(pwd)/../../lib/libdep_audio.a)
+
+# Bundle into a single self-contained archive
+ar rcs lib/libDanteAudio.a /tmp/DanteAudio.o /tmp/dep_objs/*.o
 ```
 
-This produces `libdep_audio.a` in that directory. Copy it into the SDK:
+Commit `src/DanteAudio.cpp`, `include/dante/DanteAudio.hpp`, and the updated
+`lib/libDanteAudio.a` together.
+
+### Cross-compile for aarch64 Linux
+
+Replace `g++` above with an aarch64 cross-compiler, e.g.:
+```sh
+aarch64-linux-gnu-g++ -O2 -std=c++17 -c src/DanteAudio.cpp -Iinclude -o /tmp/DanteAudio.o
+```
+Use the aarch64 `libdep_audio.a` from the Audinate DEP SDK for that target.
+
+### Build the daemon
 
 ```sh
-cp ../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/libdep_audio.a lib/libdep_audio.a
+cmake -S daemon -B daemon/build -DCMAKE_BUILD_TYPE=Release
+cmake --build daemon/build
 ```
-
-This file contains the compiled Audinate platform objects: `DanteBuffers`, `DanteSharedMemory`,
-`DanteTiming`, `DanteRunner`, `DanteTelemetry`, `DdhiClient`. Never modify it.
 
 ---
 
-### Step 2 — Consolidate into include/dante/DanteAudio.hpp
-
-Merge these six headers from `../sw__dep_examples` into `include/dante/DanteAudio.hpp`
-inside `namespace Dante {}`:
+## Architecture
 
 ```
-../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/include/dante/Buffers.hpp
-../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/buffer_client/media/include/dante/BufferView.hpp
-../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/buffer_client/media/include/dante/BufferBlockAccessor.hpp
-../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/buffer_client/media/include/dante/BufferContext.hpp
-../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/buffer_client/media/include/dante/IDanteBuffers.hpp
-../sw__dep_examples/dep_audio_buffers/dep_audio_buffers/buffer_client/media/include/dante/Log.hpp
+JUCE backend (C++)
+  → include/dante/DanteAudio.hpp   (SDK header — templates + class declarations)
+    ← src/DanteAudio.cpp           (non-template implementations)
+    ← lib/libdep_audio.a           (Audinate: SharedMemory, Buffers, Timing implementations)
+    → lib/libDanteAudio.a          (the two above bundled as a prebuilt)
 ```
 
-Read `../sw__dep_examples/dep_example_apps/dep_loopback/DanteLoopback.cpp` first — it
-demonstrates every pattern the SDK needs to support.
+`DanteAudio.hpp` is the single include for consumers. The template methods
+`accessTxBlock<Fn>` and `accessRxBlock<Fn>` are defined in the header so the compiler
+instantiates them at the call site. All other methods are defined in `DanteAudio.cpp`.
 
-Required standard includes:
-`<algorithm>`, `<atomic>`, `<chrono>`, `<cstdarg>`, `<cstdint>`, `<cstdio>`, `<ctime>`,
-`<functional>`, `<memory>`, `<stdexcept>`, `<string>`, `<thread>`, `<vector>`, `<sys/types.h>`
+### Shared memory layout (`DanteAudio.hpp` — `buffer_header_t`)
 
-**Keep inline in the header** (must not move to .cpp):
-- Template definitions: `accessTxBlock<Fn>`, `accessRxBlock<Fn>`
-- `fastForwardTx()`, `fastForwardRx()` — real-time audio path
-- `sampleAt()` — inline sample accessor
-- `memory_barrier_acquire()` — must be inline for correctness on all architectures
-- Trivial one-line getters on `BufferView` and `BufferBlockAccessor`
+The library opens `/dev/shm/<name>` (via `shm_open`) and optional separate
+`/dev/shm/<name>Tx` + `/dev/shm/<name>Rx` regions when
+`DANTE_BUFFERS_FLAG__SEPARATE_CHANNEL_MEMORY` is set.
 
-**Declare in header, define in src/DanteAudio.cpp**:
-- `toString(LogLevel)`, `fromString(LogLevel)`
-- `PrintfLogger::log()`
-- All non-trivial `BufferView` methods: `poll()`, `reset()`, timestamp helpers, channel descriptions
-- All non-trivial `BufferBlockAccessor` methods: `setChannels()`, `updateAvailable()`,
-  `getTxFramesToWrite()`, `getAvailRxFrames()`, head management
-- All `DefaultBufferContext` methods: constructor, destructor, `connect()`, `disconnect()`,
-  `wait()`, timeout handling, accessor registration
-
----
-
-### Step 3 — What to Remove
-
-The following exist in the source headers but must NOT be included in the SDK:
-
-| Remove | Reason |
-|---|---|
-| `Runner` class and `RunnerActiveChangedFn` | Consumers implement their own event loop |
-| `Telemetry` class | Requires DDHI/JSON chain, not needed by audio-only consumers |
-| `DdhiClient.hpp` and all DDHI code | Pulls in `nlohmann/json.hpp` (24k-line header) |
-| `Priority.hpp` / `setDantePriority()` / `cleanupDantePriority()` | Consumers manage thread priority themselves |
-| `IDanteTiming.hpp` | Included transitively but never used |
-| `writeTxFrames()` / `readRxFrames()` and sample format helpers | Block accessor pattern (`accessTxBlock`/`accessRxBlock`) is sufficient |
-| `connect()` overloads taking a mapped-file buffer path | Embedded/file-backed buffers only |
-| `nlohmann/` directory | Only needed by the removed telemetry chain |
-
-The `ddhiTelemetry` parameter in `DefaultBufferContext`'s constructor may be left as a
-commented-out no-op (`/*ddhiTelemetry*/`) to avoid breaking existing call sites.
-
----
-
-### Step 4 — Create src/DanteAudio.cpp
-
-```cpp
-#include <dante/DanteAudio.hpp>
-
-namespace Dante {
-// all non-template implementations
-}
+The critical `period_count` field is at byte offset **80** from the start of
+`buffer_header_t`:
 ```
-
-Move every non-trivial, non-template function body out of the header into this file.
-
----
-
-### Step 5 — Create cmake/libDanteAudio.cmake
-
-This is the consumer-facing cmake file. It only defines the imported target — no source
-compilation, no build targets:
-
-```cmake
-get_filename_component(_DANTE_SDK_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
-
-add_library(DanteAudio STATIC IMPORTED GLOBAL)
-set_target_properties(DanteAudio PROPERTIES
-    IMPORTED_LOCATION "${_DANTE_SDK_ROOT}/lib/libDanteAudio.a"
-    INTERFACE_INCLUDE_DIRECTORIES "${_DANTE_SDK_ROOT}/include"
-)
-target_link_libraries(DanteAudio INTERFACE pthread rt)
+metadata (32 bytes) + audio (32 bytes)
+  + time.{ epoch_seconds(4) + epoch_samples(4) + samples_per_period(4) + _pad(4) } (16 bytes)
+  = 80
 ```
-
-Consumers include this file and link against `DanteAudio`. No SDK source is compiled on
-their end.
-
----
-
-### Step 6 — Build and Commit libDanteAudio.a
-
-`libDanteAudio.a` is produced by compiling `DanteAudio.cpp` and merging it with
-`libdep_audio.a`. This is done by the `dante_sdk_dist` target in the consuming project's
-`CMakeLists.txt`. Add the following to the consuming project (not to this SDK's cmake):
-
-```cmake
-set(_DANTE_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../Dante-DEP-Client-SDK")
-set(_DANTE_DIST_DIR "${CMAKE_BINARY_DIR}/dante-dep-sdk")
-set(_DANTE_DIST_LIB "${_DANTE_DIST_DIR}/lib/libDanteAudio.a")
-
-add_library(dante_audio_impl OBJECT EXCLUDE_FROM_ALL "${_DANTE_SDK_ROOT}/src/DanteAudio.cpp")
-target_include_directories(dante_audio_impl PRIVATE "${_DANTE_SDK_ROOT}/include")
-
-add_custom_command(
-    OUTPUT "${_DANTE_DIST_LIB}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${_DANTE_DIST_DIR}/lib"
-    COMMAND ${CMAKE_COMMAND} -E copy
-            "${_DANTE_SDK_ROOT}/lib/libdep_audio.a"
-            "${_DANTE_DIST_LIB}"
-    COMMAND ${CMAKE_AR} q "${_DANTE_DIST_LIB}"
-            $<TARGET_OBJECTS:dante_audio_impl>
-    DEPENDS dante_audio_impl "${_DANTE_SDK_ROOT}/lib/libdep_audio.a"
-    COMMENT "Building combined Dante SDK library"
-)
-
-add_custom_target(dante_sdk_dist
-    DEPENDS "${_DANTE_DIST_LIB}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${_DANTE_DIST_DIR}/include/dante"
-    COMMAND ${CMAKE_COMMAND} -E copy
-            "${_DANTE_SDK_ROOT}/include/dante/DanteAudio.hpp"
-            "${_DANTE_DIST_DIR}/include/dante/DanteAudio.hpp"
-    COMMENT "Dante SDK distribution: build/dante-dep-sdk/"
-)
-```
-
-`EXCLUDE_FROM_ALL` on `dante_audio_impl` ensures `DanteAudio.cpp` is not compiled during a
-normal build — only when `dante_sdk_dist` is explicitly requested.
-
-To build and commit the combined library (run from the consuming project directory):
-
-```sh
-cmake --build build --target dante_sdk_dist
-cp build/dante-dep-sdk/lib/libDanteAudio.a ../Dante-DEP-Client-SDK/lib/libDanteAudio.a
-```
-
-Commit `DanteAudio.cpp` and the updated `libDanteAudio.a` together.
+(The 4-byte pad is inserted by the compiler to align the subsequent `uint64_t`.)
 
 ---
 
 ## Key Implementation Notes
 
-- **`memory_barrier_acquire()`** emits `__sync_synchronize()` — must be at the call site.
 - **`accessTxBlock` / `accessRxBlock`** take a callback and must stay in the header for
   the compiler to instantiate them at the call site.
-- **`BlockAccessorConfig`** carries TX latency in microseconds (default 1000µs).
+- **`BlockAccessorConfig`** carries TX latency in microseconds (default 10 000 µs).
 - **Late error handling**: when the accessor reports late frames, callers should use
   `fastForwardTx` / `fastForwardRx` to skip ahead rather than accumulate drift.
   See `dep_loopback/DanteLoopback.cpp` for the reference implementation of this pattern.
+- **`frames` must be capped to `periodSize`** before passing to the audio callback and
+  to `readRxToFloat`/`writeFloatToTx`. After a late recovery `getTxFramesToWrite()`
+  returns `mTxLatencyFrames` (48 at 48 kHz / 1 ms), which exceeds `periodSize` (16),
+  causing out-of-bounds writes into the `periodSize`-allocated staging buffers.
+  Cap: `frames = std::min((unsigned)txFrames, periodSize)`.
+
+---
+
+## Real DEP Buffer Geometry (verified on target hardware)
+
+From `dinfo` on the target:
+
+| Parameter | Value |
+|---|---|
+| Sample rate | 48000 Hz |
+| Samples per channel (buffer depth) | 48000 (= 1 second) |
+| Samples per period | **16** |
+| TX/RX channels | 32 each |
+| Encoding | PCM32 |
+
+Period duration at 48 kHz: **333 µs**. The TX latency default of 1000 µs = **48 frames**,
+which is 3 periods. This is correct — the latency spans multiple periods by design.
+
+---
+
+## Period Synchronisation — Timing Object and Futex
+
+### What the timing object is
+
+The `timing_object_subheader_t` names a **POSIX named semaphore** (Linux) or an
+**auto-reset Win32 Event** (Windows). The DEP daemon calls `sem_post()` once per period.
+
+**Critical**: this is NOT a broadcast primitive. `sem_post()` unblocks exactly one
+`sem_wait()` caller. If multiple clients open and wait on the same semaphore, they compete
+— only one wakes per period. The others starve or receive periods at a fraction of the
+real rate. **Only one process may call `Timing::wait()`.**
+
+### dep_sync_fanoutd — the relay daemon
+
+`dep_sync_fanoutd` is the sole consumer of the DEP semaphore. It broadcasts a futex wake
+after each period so any number of clients can block on `period_count` simultaneously:
+
+```
+dep_sync_fanoutd:
+    sem_timedwait(semaphore)            // sole holder of the DEP semaphore
+    FUTEX_WAKE(INT_MAX, &period_count)  // broadcast to all waiting clients
+    loop
+```
+
+Source: `daemon/dep_sync_fanoutd.cpp`. Built with `daemon/CMakeLists.txt`.
+Systemd unit: `daemon/dep_sync_fanoutd.service` — `BindsTo=dep.service`.
+
+**Important**: once `dep_sync_fanoutd` is running, no other process should call
+`Timing::wait()` (which calls `sem_timedwait` on the same semaphore). Doing so causes
+semaphore contention and missed periods. Clients must switch to `FUTEX_WAIT` on
+`period_count` instead of using the `Timing` class.
+
+### Client-side futex wait pattern
+
+Clients that use the daemon wait on the low 32 bits of `header->time.period_count`
+using `FUTEX_WAIT` (no `FUTEX_PRIVATE_FLAG` — the kernel keys on the physical page,
+enabling cross-process wake):
+
+```cpp
+uint32_t seen = static_cast<uint32_t>(period_count);
+struct timespec ts { timeout_ms / 1000, (timeout_ms % 1000) * 1000000L };
+long ret = syscall(SYS_futex,
+    reinterpret_cast<uint32_t *>(&period_count),
+    FUTEX_WAIT, seen, &ts, nullptr, 0);
+// EAGAIN: period_count already changed — process immediately
+// ETIMEDOUT / EINTR: retry or abort
+```
+
+Any number of clients can call `FUTEX_WAIT` simultaneously; a single
+`FUTEX_WAKE(INT_MAX)` from the daemon wakes them all.
+
+**Note**: `DefaultBufferContext` no longer holds or opens a `Timing` object.
+`mTiming` has been removed from the class; `connect()` skips the semaphore open,
+and `disconnect()` skips the semaphore close. The daemon is now the sole semaphore consumer.
+
+### Migration path
+
+When the DEP server is updated to call `FUTEX_WAKE(INT_MAX, &period_count)` natively
+after each period increment, `dep_sync_fanoutd` is simply removed from the service
+configuration. Clients require no changes — they already use `FUTEX_WAIT`.
+
+| Stage | Server | dep_sync_fanoutd | Clients |
+|---|---|---|---|
+| Now | semaphore only | running | `FUTEX_WAIT` |
+| After server update | semaphore + `FUTEX_WAKE` | removed | `FUTEX_WAIT` — unchanged |
+
+The `Dante::Timing` class and semaphore path can be removed from the SDK entirely once
+server-native futex wake is deployed.

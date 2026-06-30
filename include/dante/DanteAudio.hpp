@@ -614,7 +614,6 @@ private:
 
     Dante::Buffers             mBuffers;
     Dante::DanteBuffersAdapter mBufferAdapter;
-    Dante::Timing              mTiming;
 
     std::shared_ptr<IDanteLogger>      mLog;
     BufferView                         mBufferView;
