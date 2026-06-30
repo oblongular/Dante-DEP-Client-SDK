@@ -1,0 +1,17 @@
+[Unit]
+Description=Dante DEP Period-Sync Fanout Daemon
+Documentation=https://www.audinate.com
+After=dep.service
+BindsTo=dep.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dep_sync_fanoutd DanteBuffers
+Restart=on-failure
+RestartSec=1s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dep-sync-fanoutd
+
+[Install]
+WantedBy=multi-user.target
