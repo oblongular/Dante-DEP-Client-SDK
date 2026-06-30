@@ -5,14 +5,26 @@ A C++ client SDK for the Audinate DEP (Dante Embedded Platform) shared-memory au
 ## Contents
 
 ```
-include/dante/DanteAudio.hpp   — public API (single header)
-lib/libDanteAudio.a            — prebuilt static library
-lib/libdep_audio.a             — original Audinate DEP prebuilt (input to rebuild only)
-src/DanteAudio.cpp             — source used to build libDanteAudio.a
-cmake/libDanteAudio.cmake      — CMake integration
+include/dante/DanteAudio.hpp     — public API (single header)
+lib/libDanteAudio.a              — prebuilt static library
+lib/libdep_audio.a               — Audinate DEP prebuilt (input to library rebuild only)
+src/DanteAudio.cpp               — source used to build libDanteAudio.a
+cmake/libDanteAudio.cmake        — CMake integration for consumers
+daemon/dep_sync_fanoutd.cpp      — period-sync relay daemon (see below)
+daemon/CMakeLists.txt            — CMake build for the daemon
+daemon/dep_sync_fanoutd.service  — systemd unit
+flake.nix                        — Nix flake: dev shell + daemon build targets
 ```
 
-## Using the SDK
+## Development environment
+
+```sh
+nix develop
+```
+
+Drops into a shell with `cmake`, `gcc`, and the aarch64 cross-compiler on `PATH`.
+
+## Using the SDK (consumers)
 
 Include `cmake/libDanteAudio.cmake` and link against the `DanteAudio` target:
 
@@ -22,39 +34,48 @@ include(path/to/Dante-DEP-Client-SDK/cmake/libDanteAudio.cmake)
 target_link_libraries(MyApp PRIVATE DanteAudio)
 ```
 
-This gives `MyApp` the include path for `<dante/DanteAudio.hpp>` and links `libDanteAudio.a`
-with its `pthread` and `rt` dependencies.
+This gives `MyApp` the include path for `<dante/DanteAudio.hpp>` and links
+`libDanteAudio.a` with its `pthread` and `rt` dependencies.
 
-## CMake Targets
+## Rebuilding libDanteAudio.a
 
-### `DanteAudio` (defined in `cmake/libDanteAudio.cmake`)
-
-The consumer-facing imported target. Links against the committed prebuilt `libDanteAudio.a`.
-No SDK source is compiled as part of a consumer's build.
-
-### `dante_sdk_dist` (defined in the consuming project's `CMakeLists.txt`)
-
-An explicit-only target (not built by default) that documents and reproduces how
-`libDanteAudio.a` was built. It compiles `DanteAudio.cpp`, merges the result with the
-original Audinate `libdep_audio.a`, and writes the combined library and header to
-`build/dante-dep-sdk/`:
+The committed `lib/libDanteAudio.a` bundles `DanteAudio.cpp` with the Audinate
+`libdep_audio.a`. Rebuild it after changing `src/DanteAudio.cpp`:
 
 ```sh
-cmake --build build --target dante_sdk_dist
+# Inside nix develop (or with an equivalent g++ available)
+g++ -O2 -std=c++17 -c src/DanteAudio.cpp -Iinclude -o /tmp/DanteAudio.o
+mkdir -p /tmp/dep_objs && (cd /tmp/dep_objs && ar x $(pwd)/../../lib/libdep_audio.a)
+ar rcs lib/libDanteAudio.a /tmp/DanteAudio.o /tmp/dep_objs/*.o
 ```
 
-Output:
-```
-build/dante-dep-sdk/
-  include/dante/DanteAudio.hpp
-  lib/libDanteAudio.a
-```
+Commit `src/DanteAudio.cpp` and the updated `lib/libDanteAudio.a` together.
+For cross-compilation, see CLAUDE.md.
 
-To update the committed `libDanteAudio.a` after changing `DanteAudio.cpp`:
+## Building the daemon
+
+`dep_sync_fanoutd` is a small Linux daemon that bridges the DEP POSIX semaphore into a
+futex broadcast, allowing any number of clients to block on `period_count` simultaneously.
+It must be running before any process calls `DefaultBufferContext::wait()`.
 
 ```sh
-cmake --build build --target dante_sdk_dist
-cp build/dante-dep-sdk/lib/libDanteAudio.a lib/libDanteAudio.a
+# Cross-compiled for the aarch64 target (deploy this one)
+nix build .#dep-sync-fanoutd-aarch64
+result/bin/dep_sync_fanoutd   # copy to target
+
+# Native x86-64 build (smoke test only)
+nix build .#dep-sync-fanoutd
 ```
 
-Commit `DanteAudio.cpp` and the updated `libDanteAudio.a` together.
+## Deploying the daemon
+
+Copy `result/bin/dep_sync_fanoutd` to `/usr/local/bin/` on the target, then install
+the systemd unit:
+
+```sh
+cp daemon/dep_sync_fanoutd.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now dep-sync-fanoutd
+```
+
+The unit is `BindsTo=dep.service` — it starts and stops with DEP.
