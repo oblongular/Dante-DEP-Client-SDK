@@ -126,6 +126,19 @@ typedef struct buffer_header
 
 } buffer_header_t;
 
+// Returns the FUTEX_WAIT/FUTEX_WAKE-compatible address of the period-count word:
+// the low 32 bits of time.period_count (little-endian target). Centralizes the
+// buffer_header_t layout knowledge and the volatile/const-cast dance so futex
+// callers (DanteAudio.cpp, dep_sync_fanoutd) never need to touch the struct
+// layout themselves. Safe to read *header->time.period_count directly beforehand
+// for the futex "expected value" argument - that read should go through the
+// original const volatile pointer, not through this function's return value.
+inline uint32_t * getPeriodCountFutexWord(const volatile buffer_header_t * header)
+{
+    return reinterpret_cast<uint32_t *>(const_cast<uint64_t *>(
+        const_cast<const uint64_t *>(&header->time.period_count)));
+}
+
 enum
 {
     TIMING_OBJECT_TYPE__NONE         = 0,
