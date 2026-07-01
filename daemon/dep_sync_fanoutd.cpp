@@ -110,8 +110,7 @@ int main(int argc, char * argv[])
         return 1;
     }
 
-    // period_count: the low 32 bits are the futex word (little-endian target)
-    const volatile uint64_t * period_count = &hdr->time.period_count;
+    uint32_t * period_count_futex_word = getPeriodCountFutexWord(hdr);
 
     signal(SIGTERM, handle_signal);
     signal(SIGINT,  handle_signal);
@@ -128,10 +127,7 @@ int main(int argc, char * argv[])
         int r = sem_timedwait(sem, &deadline);
         if (r == 0) {
             // Period fired — wake every FUTEX_WAIT caller on period_count
-            syscall(SYS_futex,
-                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
-                    (uint32_t *)(uintptr_t)period_count,
-                    FUTEX_WAKE, INT_MAX, nullptr, nullptr, 0);
+            syscall(SYS_futex, period_count_futex_word, FUTEX_WAKE, INT_MAX, nullptr, nullptr, 0);
         } else if (errno == ETIMEDOUT || errno == EINTR) {
             continue;
         } else {

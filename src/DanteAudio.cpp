@@ -396,15 +396,11 @@ unsigned BufferBlockAccessor::clampTxFramesToTransfer(unsigned n) const
 // dep_sync_fanoutd is the sole sem_wait consumer and issues FUTEX_WAKE after each post.
 // FUTEX_WAIT without FUTEX_PRIVATE_FLAG uses the physical page as key, enabling
 // cross-process wakeup. The 100 ms timeout keeps the inactive-timeout check responsive.
-static void futex_wait_period(const volatile uint64_t * period_count)
+static void futex_wait_period(const volatile buffer_header_t * header)
 {
-    uint32_t seen = static_cast<uint32_t>(*period_count);
+    uint32_t seen = static_cast<uint32_t>(header->time.period_count);
     struct timespec ts { 0, 100 * 1000000L };  // 100 ms
-    syscall(SYS_futex,
-            // cast away volatile and const — FUTEX_WAIT only reads the word
-            reinterpret_cast<uint32_t *>(const_cast<uint64_t *>(
-                const_cast<const uint64_t *>(period_count))),
-            FUTEX_WAIT, seen, &ts, nullptr, 0);
+    syscall(SYS_futex, getPeriodCountFutexWord(header), FUTEX_WAIT, seen, &ts, nullptr, 0);
     // EAGAIN:    period_count already changed — fall through and process immediately
     // ETIMEDOUT: no wake in 100 ms — fall through and retry
     // EINTR:     signal — fall through and retry
@@ -449,11 +445,11 @@ DefaultBufferContext::WaitResult DefaultBufferContext::wait()
     if (!isConnected())
         throw std::runtime_error("Dante buffers not connected");
 
-    const volatile uint64_t * period_count = &mBuffers.getHeader()->time.period_count;
+    const volatile buffer_header_t * header = mBuffers.getHeader();
     auto endTime = mLastActiveTime + std::chrono::milliseconds(mInactiveTimeoutMs);
     do
     {
-        futex_wait_period(period_count);
+        futex_wait_period(header);
         mBufferView.poll(result.pollInfo);
     }
     while (result.pollInfo.mState == BufferView::State::CONNECTED
