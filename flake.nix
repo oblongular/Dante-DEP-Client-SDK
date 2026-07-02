@@ -14,6 +14,7 @@
       # Build the full SDK package for any stdenv — host or cross.
       #
       # Produces: $out/bin/dep_sync_fanoutd
+      #           $out/bin/dep_wakeup_counter
       #           $out/lib/libDanteAudio.a
       #           $out/include/dante/DanteAudio.hpp
       #           $out/cmake/libDanteAudio.cmake
@@ -24,6 +25,11 @@
       makePackage = stdenv:
         let
           isCross = stdenv.hostPlatform != stdenv.buildPlatform;
+          cmakeCrossFlags = lib.optionalString isCross ''
+            -DCMAKE_CROSSCOMPILING=TRUE \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=${stdenv.hostPlatform.parsed.cpu.name}
+          '';
         in
         stdenv.mkDerivation {
           pname   = "dep-client-sdk";
@@ -39,19 +45,22 @@
               -DCMAKE_INSTALL_PREFIX="$out" \
               -DCMAKE_C_COMPILER="$CC" \
               -DCMAKE_CXX_COMPILER="$CXX" \
-              ${lib.optionalString isCross ''
-                -DCMAKE_CROSSCOMPILING=TRUE \
-                -DCMAKE_SYSTEM_NAME=Linux \
-                -DCMAKE_SYSTEM_PROCESSOR=${stdenv.hostPlatform.parsed.cpu.name}
-              ''}
+              ${cmakeCrossFlags}
+            cmake -S tools -B _build_tools \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$out" \
+              -DCMAKE_C_COMPILER="$CC" \
+              -DCMAKE_CXX_COMPILER="$CXX" \
+              ${cmakeCrossFlags}
             runHook postConfigure
           '';
 
           buildPhase = ''
             runHook preBuild
 
-            # Build the daemon
+            # Build the daemon and diagnostic tools
             cmake --build _build --parallel "$NIX_BUILD_CORES"
+            cmake --build _build_tools --parallel "$NIX_BUILD_CORES"
 
             # Compile DanteAudio.cpp for the target platform
             $CXX -O2 -std=c++17 -c src/DanteAudio.cpp -Iinclude -o _DanteAudio.o
@@ -73,8 +82,9 @@
           installPhase = ''
             runHook preInstall
 
-            # Daemon binary + systemd unit (via cmake install)
+            # Daemon binary + systemd unit, and diagnostic tools (via cmake install)
             cmake --install _build
+            cmake --install _build_tools
 
             # Library, header, cmake integration
             mkdir -p $out/lib $out/include/dante $out/cmake
