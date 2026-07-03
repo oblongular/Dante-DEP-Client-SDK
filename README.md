@@ -7,22 +7,11 @@ A C++ client SDK for the Audinate DEP (Dante Embedded Platform) shared-memory au
 ```
 include/dante/DanteAudio.hpp     — public API (single header)
 lib/libDanteAudio.a              — prebuilt static library
-lib/libdep_audio.a               — Audinate DEP prebuilt (input to library rebuild only)
-src/DanteAudio.cpp               — source used to build libDanteAudio.a
 cmake/libDanteAudio.cmake        — CMake integration for consumers
-daemon/dep_sync_fanoutd.cpp      — period-sync relay daemon (see below)
-daemon/CMakeLists.txt            — CMake build for the daemon
-daemon/dep_sync_fanoutd.service  — systemd unit
-flake.nix                        — Nix flake: dev shell + daemon build targets
 ```
 
-## Development environment
-
-```sh
-nix develop
-```
-
-Drops into a shell with `cmake`, `gcc`, and the aarch64 cross-compiler on `PATH`.
+This repo ships a prebuilt library only. Source, the relay daemon, and diagnostic
+tools are developed elsewhere; this is the published artifact consumers build against.
 
 ## Using the SDK (consumers)
 
@@ -37,55 +26,6 @@ target_link_libraries(MyApp PRIVATE DanteAudio)
 This gives `MyApp` the include path for `<dante/DanteAudio.hpp>` and links
 `libDanteAudio.a` with its `pthread` and `rt` dependencies.
 
-## Rebuilding libDanteAudio.a
-
-The committed `lib/libDanteAudio.a` bundles `DanteAudio.cpp` with the Audinate
-`libdep_audio.a`. Rebuild it after changing `src/DanteAudio.cpp`:
-
-```sh
-# Inside nix develop (or with an equivalent g++ available)
-g++ -O2 -std=c++17 -c src/DanteAudio.cpp -Iinclude -o /tmp/DanteAudio.o
-mkdir -p /tmp/dep_objs && (cd /tmp/dep_objs && ar x $(pwd)/../../lib/libdep_audio.a)
-ar rcs lib/libDanteAudio.a /tmp/DanteAudio.o /tmp/dep_objs/*.o
-```
-
-Commit `src/DanteAudio.cpp` and the updated `lib/libDanteAudio.a` together.
-For cross-compilation, see CLAUDE.md.
-
-## Building the daemon
-
-`dep_sync_fanoutd` is a small Linux daemon that bridges the DEP POSIX semaphore into a
-futex broadcast, allowing any number of clients to block on `period_count` simultaneously.
-It must be running before any process calls `DefaultBufferContext::wait()`.
-
-```sh
-# Cross-compiled for the aarch64 target (deploy this one)
-nix build .#dep-client-sdk-aarch64
-# result/ contains:
-#   bin/dep_sync_fanoutd              — daemon binary for the target
-#   lib/libDanteAudio.a               — compiled for aarch64 (see note below)
-#   include/dante/DanteAudio.hpp      — SDK header
-#   cmake/libDanteAudio.cmake         — CMake integration
-#   lib/systemd/system/dep_sync_fanoutd.service
-
-# Native x86-64 build (dev/test on the build machine)
-nix build .#dep-client-sdk
-```
-
-> **Note on the aarch64 library**: the aarch64 `libDanteAudio.a` contains only
-> `DanteAudio.cpp` compiled for aarch64. The closed-source `libdep_audio.a` from
-> Audinate is x86-64 and cannot be cross-bundled. The consuming project must also
-> link against the aarch64 `libdep_audio.a` from the Audinate DEP SDK.
-
-## Deploying the daemon
-
-Copy `result/bin/dep_sync_fanoutd` to `/usr/local/bin/` on the target, then install
-the systemd unit:
-
-```sh
-cp daemon/dep_sync_fanoutd.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now dep-sync-fanoutd
-```
-
-The unit is `BindsTo=dep.service` — it starts and stops with DEP.
+**Important**: a process using `DefaultBufferContext::wait()` requires `dep_sync_fanoutd`
+to be running on the target — it bridges the DEP POSIX semaphore into a futex broadcast,
+allowing any number of clients to block on `period_count` simultaneously.
