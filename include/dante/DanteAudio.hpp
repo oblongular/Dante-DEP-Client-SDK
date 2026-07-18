@@ -634,6 +634,7 @@ private:
 
     int                                   mInactiveTimeoutMs;
     std::chrono::steady_clock::time_point mLastActiveTime;
+    unsigned                              mConsecutiveFutexTimeouts = 0;
 };
 
 } // namespace Dante
