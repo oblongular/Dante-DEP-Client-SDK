@@ -5,13 +5,15 @@ A C++ client SDK for the Audinate DEP (Dante Embedded Platform) shared-memory au
 ## Contents
 
 ```
-include/dante/DanteAudio.hpp     — public API (single header)
-lib/libDanteAudio.a              — prebuilt static library
-cmake/libDanteAudio.cmake        — CMake integration for consumers
+include/dante/DanteAudio.hpp        — public API (single header)
+lib/x86_64-linux/libDanteAudio.a    — prebuilt static library, x86_64
+lib/aarch64-linux/libDanteAudio.a   — prebuilt static library, aarch64
+cmake/libDanteAudio.cmake           — CMake integration for consumers, arch-selecting
 ```
 
-This repo ships a prebuilt library only. Source, the relay daemon, and diagnostic
-tools are developed elsewhere; this is the published artifact consumers build against.
+This repo ships prebuilt libraries only, one per supported platform. Source, the relay
+daemon, and diagnostic tools are developed elsewhere; this is the published artifact
+consumers build against.
 
 ## Using the SDK (consumers)
 
