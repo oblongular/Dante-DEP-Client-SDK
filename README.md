@@ -9,6 +9,7 @@ include/dante/DanteAudio.hpp        — public API (single header)
 lib/x86_64-linux/libDanteAudio.a    — prebuilt static library, x86_64
 lib/aarch64-linux/libDanteAudio.a   — prebuilt static library, aarch64
 cmake/libDanteAudio.cmake           — CMake integration for consumers, arch-selecting
+docs/txlead-rxlag.svg               — TX lead / RX lag diagram
 ```
 
 This repo ships prebuilt libraries only, one per supported platform. Source, the relay
@@ -33,6 +34,8 @@ to be running on the target — it bridges the DEP POSIX semaphore into a futex 
 allowing any number of clients to block on `period_count` simultaneously.
 
 ## TX lead / RX lag
+
+![TX lead / RX lag against DEP's live edge](docs/txlead-rxlag.svg)
 
 `BufferBlockAccessor` reads and writes against DEP's shared-memory ring, which advances
 one period at a time regardless of when your process actually gets scheduled. Two

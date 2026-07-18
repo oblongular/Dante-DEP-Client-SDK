@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="280" viewBox="0 0 880 280" font-family="-apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <style>
+    .bg           { fill: #ffffff; }
+    .axis         { stroke: #c3ccd6; stroke-width: 2; }
+    .tick-minor   { stroke: #c3ccd6; stroke-width: 1.5; }
+    .tick-frame   { fill: #5c6b7a; font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, monospace; font-size: 10.5px; }
+    .span-rx      { fill: #14748a; fill-opacity: 0.22; }
+    .span-tx      { fill: #c1502a; fill-opacity: 0.22; }
+    .live-line    { stroke: #a06a00; stroke-width: 2; }
+    .dot-live     { fill: #a06a00; stroke: #ffffff; stroke-width: 3; }
+    .dot-tx       { fill: #c1502a; stroke: #ffffff; stroke-width: 3; }
+    .dot-rx       { fill: #14748a; stroke: #ffffff; stroke-width: 3; }
+    .label        { font-size: 13px; fill: #17222e; font-weight: 650; }
+    .mono         { font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, monospace; font-size: 11.5px; fill: #5c6b7a; }
+    .mono-strong  { font-family: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, monospace; font-size: 12px; fill: #17222e; }
+    .bracket      { stroke: #5c6b7a; stroke-width: 1.3; fill: none; }
+  </style>
+
+  <rect class="bg" x="0" y="0" width="880" height="280"></rect>
+
+  <!-- scale: 6px per frame, live edge (frame 0) at x=400 -->
+  <!-- RX head frame -16 -> x=304; TX head frame +48 -> x=688 -->
+
+  <!-- span brackets -->
+  <path class="bracket" d="M 304 104 L 304 94 L 400 94 L 400 104"></path>
+  <text class="mono-strong" x="352" y="84" text-anchor="middle">16 frames (1 period)</text>
+
+  <path class="bracket" d="M 400 104 L 400 94 L 688 94 L 688 104"></path>
+  <text class="mono-strong" x="544" y="84" text-anchor="middle">48 frames (3 periods)</text>
+
+  <!-- span rects -->
+  <rect class="span-rx" x="304" y="104" width="96" height="18"></rect>
+  <rect class="span-tx" x="400" y="104" width="288" height="18"></rect>
+
+  <!-- axis -->
+  <line class="axis" x1="40" y1="140" x2="840" y2="140"></line>
+
+  <!-- ticks every 16 frames from -16 to +64 -->
+  <g class="tick-minor">
+    <line x1="304" y1="132" x2="304" y2="148"></line>
+    <line x1="400" y1="132" x2="400" y2="148"></line>
+    <line x1="496" y1="132" x2="496" y2="148"></line>
+    <line x1="592" y1="132" x2="592" y2="148"></line>
+    <line x1="688" y1="132" x2="688" y2="148"></line>
+    <line x1="784" y1="132" x2="784" y2="148"></line>
+  </g>
+  <g class="tick-frame" text-anchor="middle">
+    <text x="304" y="164">−16</text>
+    <text x="400" y="164">0</text>
+    <text x="496" y="164">+16</text>
+    <text x="592" y="164">+32</text>
+    <text x="688" y="164">+48</text>
+    <text x="784" y="164">+64</text>
+  </g>
+
+  <!-- live edge -->
+  <text class="label" x="400" y="26" text-anchor="middle" fill="#a06a00">live edge</text>
+  <text class="mono" x="400" y="42" text-anchor="middle">DEP period_count × periodSize</text>
+  <line class="live-line" x1="400" y1="50" x2="400" y2="140"></line>
+
+  <!-- head + live markers -->
+  <circle class="dot-rx" cx="304" cy="140" r="7"></circle>
+  <circle class="dot-live" cx="400" cy="140" r="7"></circle>
+  <circle class="dot-tx" cx="688" cy="140" r="7"></circle>
+
+  <!-- RX head -->
+  <text class="label" x="304" y="192" text-anchor="middle" fill="#14748a">RX head</text>
+  <text class="mono" x="304" y="208" text-anchor="middle">mClientRxHead</text>
+  <text class="mono" x="304" y="222" text-anchor="middle">now − rxLagFrames</text>
+
+  <!-- TX head -->
+  <text class="label" x="688" y="192" text-anchor="middle" fill="#c1502a">TX head</text>
+  <text class="mono" x="688" y="208" text-anchor="middle">mClientTxHead</text>
+  <text class="mono" x="688" y="222" text-anchor="middle">now + txLeadFrames</text>
+
+  <!-- axis ends -->
+  <text class="mono" x="40" y="258" text-anchor="start">older samples</text>
+  <text class="mono" x="840" y="258" text-anchor="end">not yet transmitted</text>
+</svg>
