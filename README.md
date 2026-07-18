@@ -54,3 +54,10 @@ Dante::BlockAccessorConfig config(txLeadUs, rxLagUs);  // both in microseconds
 Both are one-way added latency, not free safety margins — raise them only as far as your
 scheduling jitter actually requires. Same concept as `snd_dep_alsa`'s `tx_lead_us`/
 `rx_lag_us` module parameters, for anyone tuning both.
+
+**Rounding**: microseconds convert to frames via *truncating* integer division
+(`frames = us × sampleRate / 1e6`), never rounded to the nearest frame. To
+guarantee at least N frames, round your µs value **up**, not to the nearest
+integer — e.g. at 48kHz, 32 frames = 666.666...µs exactly, so `666` truncates
+to 31 frames (one short) while `667` is the smallest integer µs value that
+still reaches 32.
