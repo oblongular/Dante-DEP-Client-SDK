@@ -450,11 +450,14 @@ struct ChannelBlockDescription
 
 struct BlockAccessorConfig
 {
-    unsigned mTxLatencyUs      = 10000;
-    unsigned mTxLatencySamples = 0;
+    unsigned mTxLeadUs      = 1000;
+    unsigned mTxLeadSamples = 0;
+    unsigned mRxLagUs       = 0;
+    unsigned mRxLagSamples  = 0;
 
     BlockAccessorConfig() = default;
-    BlockAccessorConfig(unsigned txLatencyUs) : mTxLatencyUs(txLatencyUs) {}
+    BlockAccessorConfig(unsigned txLeadUs, unsigned rxLagUs = 0)
+        : mTxLeadUs(txLeadUs), mRxLagUs(rxLagUs) {}
 };
 
 class BufferBlockAccessor
@@ -504,8 +507,10 @@ private:
 
     BufferView & mBufferView;
 
-    const unsigned mTxLatencyUs;
-    const unsigned mConfiguredTxLatencySamples;
+    const unsigned mTxLeadUs;
+    const unsigned mConfiguredTxLeadSamples;
+    const unsigned mRxLagUs;
+    const unsigned mConfiguredRxLagSamples;
 
     ChannelBlockDescription mTxChannels      = {0, 0};
     ChannelBlockDescription mRxChannels      = {0, 0};
@@ -514,7 +519,8 @@ private:
     unsigned mClientRxHead    = 0;
     int      mTxFramesToWrite = 0;
     unsigned mRxAvailable     = 0;
-    unsigned mTxLatencyFrames = 0;
+    unsigned mTxLeadFrames    = 0;
+    unsigned mRxLagFrames     = 0;
 };
 
 template <typename BlockAccessFn>
